@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Мониторинг КСЖ</title>
+<style>
+:root{
+  --bg:#f6f7f9;--surface:#fff;--text:#1b1f24;--muted:#5f6b7a;--line:#e3e7ec;
+  --accent:#2f5bd3;--high:#c2410c;--high-bg:#fdecdf;--mid:#a16207;--mid-bg:#fdf4d7;
+  --low:#15803d;--low-bg:#e2f4e8;--min:#c2410c;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#12151a;--surface:#1b2027;--text:#e7eaee;--muted:#9aa6b4;--line:#2c333d;
+  --accent:#7aa0ff;--high:#fb923c;--high-bg:#3a2417;--mid:#facc15;--mid-bg:#352d12;
+  --low:#4ade80;--low-bg:#15301f;--min:#fb923c;}}
+:root[data-theme="dark"]{
+  --bg:#12151a;--surface:#1b2027;--text:#e7eaee;--muted:#9aa6b4;--line:#2c333d;
+  --accent:#7aa0ff;--high:#fb923c;--high-bg:#3a2417;--mid:#facc15;--mid-bg:#352d12;
+  --low:#4ade80;--low-bg:#15301f;--min:#fb923c;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{padding:20px 16px 0;max-width:1180px;margin:0 auto}
+header h1{margin:0;font-size:22px}
+header p{margin:4px 0 0;color:var(--muted);font-size:13px}
+nav{max-width:1180px;margin:12px auto 0;padding:0 16px;display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+nav button{background:none;border:0;border-bottom:2px solid transparent;color:var(--muted);padding:10px 12px;font:inherit;cursor:pointer}
+nav button.active{color:var(--text);border-color:var(--accent);font-weight:600}
+main{max-width:1180px;margin:0 auto;padding:16px}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.card h2{margin:0 0 10px;font-size:16px}
+.kpi .v{font-size:24px;font-weight:650;font-variant-numeric:tabular-nums}
+.kpi .l{color:var(--muted);font-size:13px}
+.kpi .d{font-size:13px}
+.pos{color:var(--low)}.neg{color:var(--high)}
+.two{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));margin-top:12px}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:14px;font-variant-numeric:tabular-nums}
+th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--muted);font-weight:600;font-size:12px;cursor:default}
+th.sort{cursor:pointer}th.sort:hover{color:var(--text)}
+tr.link{cursor:pointer}tr.link:hover td{background:var(--bg)}
+.badge{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600}
+.b-high{background:var(--high-bg);color:var(--high)}
+.b-mid{background:var(--mid-bg);color:var(--mid)}
+.b-low{background:var(--low-bg);color:var(--low)}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+input,select{font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--text)}
+.muted{color:var(--muted);font-size:13px}
+.warn{border-left:3px solid var(--high);padding-left:10px;margin:6px 0}
+svg text{fill:var(--muted);font-size:11px}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:6px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+a{color:var(--accent)}
+ul{margin:6px 0;padding-left:20px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Мониторинг КСЖ Республики Казахстан</h1>
+  <p id="meta"></p>
+</header>
+<nav id="tabs"></nav>
+<main id="view"></main>
+
+<script src="data.js"></script>
+<script>
+(function(){
+const D = window.KSJ_DATA;
+if(!D){document.getElementById('view').innerHTML='<div class="card">Нет файла data.js. Запустите scripts\\build-data.ps1.</div>';return;}
+const M = D.meta, C = D.companies;
+const NMP_MIN = 1, NMP_WATCH = 1.3, NMP_OK = 2.0;
+const lastNmp = '2026-10-01';
+
+// ---------- форматирование ----------
+const nf1 = new Intl.NumberFormat('ru-RU',{minimumFractionDigits:1,maximumFractionDigits:1});
+const nf2 = new Intl.NumberFormat('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2});
+const f1 = v => v==null?'н/д':nf1.format(v).replace('-','−');
+const f2 = v => v==null?'н/д':nf2.format(v);
+const pct = v => v==null?'н/д':(v>0?'+':'')+f1(v)+'%';
+const cls = v => v>0?'pos':v<0?'neg':'';
+const dmy = iso => iso.split('-').reverse().join('.');
+const esc = s => String(s??'').replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]));
+
+// ---------- расчеты по методике (PRO.md, раздел 4) ----------
+C.forEach(c=>{
+  c.assetsDelta = (c.assets1001/c.assets0101-1)*100;
+  c.capitalDelta = (c.capital1001/c.capital0101-1)*100;
+  c.capToAssets = c.capital1001/c.assets1001*100;
+  c.roe = c.profit*12/9/((c.capital0101+c.capital1001)/2)*100;
+  c.nmpNow = c.nmp[lastNmp];
+  c.risk = calcRisk(c);
+});
+function calcRisk(c){
+  const n = c.nmpNow;
+  if(n < NMP_WATCH || (c.capitalDelta < -20 && c.profit < 0)) return 'Повышенный';
+  if(n >= NMP_OK && c.profit > 0 && c.capitalDelta > 0) return 'Низкий';
+  return 'Умеренный';
+}
+const riskCls = r => r==='Повышенный'?'b-high':r==='Низкий'?'b-low':'b-mid';
+const badge = r => `<span class="badge ${riskCls(r)}">${r}</span>`;
+const nmpColor = v => v==null?'':v<NMP_WATCH?'var(--high)':v<NMP_OK?'var(--mid)':'var(--low)';
+
+const sum = k => C.reduce((a,c)=>a+(c[k]||0),0);
+const T = {
+  assets0101:sum('assets0101'),assets1001:sum('assets1001'),
+  capital0101:sum('capital0101'),capital1001:sum('capital1001'),
+  reserves1001:sum('reserves1001'),premiums:sum('premiums'),
+  claims:sum('claims'),profit:sum('profit'),profitPrev:sum('profitPrev')
+};
+
+document.getElementById('meta').textContent =
+  `Период: ${M.period} · нормативы на ${M.prudentialAsOf} · ${M.units} · подготовлено ${M.preparedAt}`;
+
+// ---------- графики (SVG) ----------
+function barChart(items,{w=520,h=240,fmt=f1,color='var(--accent)'}={}){
+  const pad={l:110,r:50,t:6,b:6}, bh=(h-pad.t-pad.b)/items.length;
+  const max=Math.max(...items.map(i=>Math.abs(i.v)));
+  const x=v=>pad.l+(w-pad.l-pad.r)*v/max;
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" role="img">`+items.map((it,i)=>{
+    const y=pad.t+i*bh;
+    return `<text x="${pad.l-6}" y="${y+bh/2+4}" text-anchor="end">${esc(it.l)}</text>
+      <rect x="${pad.l}" y="${y+3}" width="${Math.max(1,x(it.v)-pad.l)}" height="${bh-6}" rx="3" fill="${it.c||color}"/>
+      <text x="${x(it.v)+4}" y="${y+bh/2+4}">${fmt(it.v)}</text>`;}).join('')+'</svg>';
+}
+function lineChart(series,dates,{w=560,h=240,minLine=null}={}){
+  const pad={l:36,r:14,t:10,b:24};
+  const vals=series.flatMap(s=>s.v.filter(v=>v!=null)).concat(minLine??[]);
+  const max=Math.ceil(Math.max(...vals)), min=0;
+  const x=i=>pad.l+(w-pad.l-pad.r)*i/(dates.length-1);
+  const y=v=>pad.t+(h-pad.t-pad.b)*(1-(v-min)/(max-min));
+  let g='';
+  for(let t=0;t<=max;t+=Math.max(1,Math.round(max/5))) g+=`<line x1="${pad.l}" x2="${w-pad.r}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)"/><text x="${pad.l-6}" y="${y(t)+4}" text-anchor="end">${t}</text>`;
+  dates.forEach((d,i)=>g+=`<text x="${x(i)}" y="${h-6}" text-anchor="middle">${dmy(d).slice(0,5)}</text>`);
+  if(minLine!=null) g+=`<line x1="${pad.l}" x2="${w-pad.r}" y1="${y(minLine)}" y2="${y(minLine)}" stroke="var(--min)" stroke-dasharray="4 3"/><text x="${pad.l+4}" y="${y(minLine)-4}">минимум ${minLine}</text>`;
+  series.forEach(s=>{
+    let p='';s.v.forEach((v,i)=>{if(v==null)return;p+=(p?'L':'M')+x(i)+' '+y(v);});
+    g+=`<path d="${p}" fill="none" stroke="${s.c}" stroke-width="2"/>`;
+    s.v.forEach((v,i)=>{if(v!=null)g+=`<circle cx="${x(i)}" cy="${y(v)}" r="3" fill="${s.c}"><title>${esc(s.l)} ${dmy(dates[i])}: ${f2(v)}</title></circle>`;});
+  });
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" role="img">${g}</svg>`;
+}
+const PALETTE=['#2f5bd3','#e8710a','#1a9e77','#c2185b','#7b5cd6','#8d6e63','#0097a7','#689f38','#d81b60','#5c6bc0'];
+
+// ---------- представления ----------
+const views = {
+  overview(){
+    const watch=C.filter(c=>c.risk==='Повышенный');
+    const kpi=(l,v,d)=>`<div class="card kpi"><div class="l">${l}</div><div class="v">${v}</div><div class="d ${cls(d)}">${d==null?'':pct(d)+' с начала года'}</div></div>`;
+    const shares=[...C].sort((a,b)=>b.premiums-a.premiums).map(c=>({l:c.name,v:c.premiums/T.premiums*100}));
+    return `<div class="grid">
+      ${kpi('Активы, млрд ₸',f1(T.assets1001),(T.assets1001/T.assets0101-1)*100)}
+      ${kpi('Регуляторный капитал',f1(T.capital1001),(T.capital1001/T.capital0101-1)*100)}
+      ${kpi('Страховые резервы',f1(T.reserves1001),null)}
+      <div class="card kpi"><div class="l">Премии за 9 мес.</div><div class="v">${f1(T.premiums)}</div><div class="d muted">выплаты ${f1(T.claims)}</div></div>
+      <div class="card kpi"><div class="l">Прибыль за 9 мес.</div><div class="v">${f1(T.profit)}</div><div class="d neg">год назад ${f1(T.profitPrev)}</div></div>
+    </div>
+    <div class="two">
+      <div class="card"><h2>Требуют внимания</h2>${watch.map(c=>`<p class="warn"><a href="#company/${c.id}">${esc(c.name)}</a> — Нмп ${f2(c.nmpNow)}, капитал ${pct(c.capitalDelta)}, прибыль ${f1(c.profit)}</p>`).join('')}
+        <p class="muted">Все 10 КСЖ выполняют пруденциальные нормативы на 01.10 и 01.11.2026.</p></div>
+      <div class="card"><h2>Доли в премиях за 9 мес., %</h2>${barChart(shares,{h:260})}</div>
+    </div>
+    <div class="two">
+      <div class="card"><h2>Регуляторный капитал, млрд ₸ (01.01 → 01.10)</h2>
+        ${barChart([...C].sort((a,b)=>b.capital1001-a.capital1001).map(c=>({l:c.name,v:c.capital1001,c:c.capitalDelta<0?'var(--high)':'var(--low)'})),{h:260})}
+        <div class="legend"><span><i style="background:var(--low)"></i>рост</span><span><i style="background:var(--high)"></i>снижение</span></div></div>
+      <div class="card"><h2>Активы на 01.10.2026, млрд ₸</h2>${barChart([...C].sort((a,b)=>b.assets1001-a.assets1001).map(c=>({l:c.name,v:c.assets1001})),{h:260})}</div>
+    </div>`;
+  },
+
+  companies(){
+    const st=loadState();
+    return `<div class="card">
+      <div class="toolbar">
+        <input id="q" placeholder="Поиск компании" value="${esc(st.q)}">
+        <select id="rf"><option value="">Все уровни риска</option>${['Повышенный','Умеренный','Низкий'].map(r=>`<option${st.rf===r?' selected':''}>${r}</option>`).join('')}</select>
+      </div>
+      <div class="tablewrap"><table id="ct"></table></div>
+      <p class="muted">Нажмите на строку, чтобы открыть карточку. Нажмите на заголовок, чтобы отсортировать.</p></div>`;
+  },
+
+  company(id){
+    const c=C.find(x=>x.id===id); if(!c) return '<div class="card">Компания не найдена.</div>';
+    const row=(l,v)=>`<tr><td>${l}</td><td>${v}</td></tr>`;
+    const mismatch=c.risk!==c.riskReported?`<p class="warn">Расчет по формальному правилу дает «${c.risk}», в отчете — «${c.riskReported}» (с учетом рейтинга как корректирующего фактора).</p>`:'';
+    return `<p><a href="#companies">← Все компании</a></p>
+    <div class="card"><h2>${esc(c.name)} ${badge(c.riskReported)}</h2>${c.note?`<p class="muted">${esc(c.note)}</p>`:''}
+      <p>${esc(c.rating)}</p><p class="muted">${esc(c.riskBasis)}</p>${mismatch}</div>
+    <div class="two">
+      <div class="card"><h2>Нмп на отчетные даты</h2>${lineChart([{l:c.name,c:'var(--accent)',v:M.nmpDates.map(d=>c.nmp[d])}],M.nmpDates,{minLine:NMP_MIN})}
+        ${c.nmp['2026-04-01']==null?'<p class="muted">01.04.2026 — значение исключено (вероятная ошибка в файле НБРК).</p>':''}</div>
+      <div class="card"><h2>Показатели, млрд ₸</h2><div class="tablewrap"><table>
+        ${row('Активы 01.01 → 01.10',`${f1(c.assets0101)} → ${f1(c.assets1001)} <span class="${cls(c.assetsDelta)}">${pct(c.assetsDelta)}</span>`)}
+        ${row('Капитал 01.01 → 01.10',`${f1(c.capital0101)} → ${f1(c.capital1001)} <span class="${cls(c.capitalDelta)}">${pct(c.capitalDelta)}</span>`)}
+        ${row('Резервы 01.10',`${f1(c.reserves1001)} <span class="${cls(c.reservesDeltaPct)}">${pct(c.reservesDeltaPct)}</span>`)}
+        ${row('Премии 9 мес.',`${f1(c.premiums)} <span class="${cls(c.premiumsDeltaPct)}">${pct(c.premiumsDeltaPct)}</span>`)}
+        ${row('Выплаты 9 мес.',f1(c.claims))}
+        ${row('Коэффициент выплат',f1(c.claimsRatioPct)+'%')}
+        ${row('Доля в перестрахование',f1(c.cededSharePct)+'%')}
+        ${row('Прибыль 9 мес. 2026 / 2025',`<span class="${cls(c.profit)}">${f1(c.profit)}</span> / ${f1(c.profitPrev)}`)}
+        ${row('ROE, годовой',`<span class="${cls(c.roe)}">${f1(c.roe)}%</span>`)}
+        ${row('Капитал / активы',f1(c.capToAssets)+'%')}
+        ${row('НДВА 01.10 / 01.11',`${f2(c.ndva['2026-10-01'])} / ${f2(c.ndva['2026-11-01'])}`)}
+      </table></div></div>
+    </div>`;
+  },
+
+  solvency(){
+    const ds=M.nmpDates;
+    const cell=v=>`<td style="color:${nmpColor(v)};font-weight:600">${v==null?'н/д*':f2(v)}</td>`;
+    const top=[...C].sort((a,b)=>a.nmpNow-b.nmpNow).slice(0,5);
+    return `<div class="card"><h2>Норматив маржи платежеспособности (Нмп) и НДВА</h2><div class="tablewrap"><table>
+      <tr><th>Компания</th>${ds.map(d=>`<th>${dmy(d)}</th>`).join('')}<th>НДВА 01.10</th><th>НДВА 01.11</th></tr>
+      ${C.map(c=>`<tr class="link" data-id="${c.id}"><td>${esc(c.name)}</td>${ds.map(d=>cell(c.nmp[d])).join('')}<td>${f2(c.ndva['2026-10-01'])}</td><td>${f2(c.ndva['2026-11-01'])}</td></tr>`).join('')}
+      </table></div>
+      <div class="legend"><span><i style="background:var(--high)"></i>ниже 1,3 — повышенное внимание</span><span><i style="background:var(--mid)"></i>1,3–2,0 — умеренный запас</span><span><i style="background:var(--low)"></i>от 2,0 — комфортно</span></div>
+      <p class="muted">Требование для Нмп и НДВА — больше 1. *Freedom Life на 01.04.2026: данные в файле НБРК совпадают с 01.09.2026, значение исключено.</p></div>
+    <div class="card" style="margin-top:12px"><h2>Пять компаний с наименьшим запасом Нмп</h2>
+      ${lineChart(top.map((c,i)=>({l:c.name,c:PALETTE[i],v:ds.map(d=>c.nmp[d])})),ds,{minLine:NMP_MIN,h:260})}
+      <div class="legend">${top.map((c,i)=>`<span><i style="background:${PALETTE[i]}"></i>${esc(c.name)}</span>`).join('')}</div></div>`;
+  },
+
+  ratings(){
+    return `<div class="card"><h2>Рейтинги и оценка риска контрагентов</h2><div class="tablewrap"><table>
+      <tr><th>Компания</th><th style="text-align:left">Рейтинг (по раскрытию компании)</th><th>Риск</th><th>По правилу</th></tr>
+      ${C.map(c=>`<tr class="link" data-id="${c.id}"><td>${esc(c.name)}</td><td style="text-align:left;white-space:normal">${esc(c.rating)}</td><td>${badge(c.riskReported)}</td><td>${badge(c.risk)}</td></tr>`).join('')}
+      </table></div>
+      <p class="muted">«По правилу» — формальный расчет: повышенный — Нмп &lt; 1,3 или снижение капитала &gt; 20% при убытке; низкий — Нмп ≥ 2,0 при прибыли и росте капитала; иначе умеренный. Рейтинг — корректирующий фактор. Окончательное решение — за коллегиальным органом.</p></div>`;
+  },
+
+  sources(){
+    return `<div class="card"><h2>Источники</h2><ul>
+      <li>НБРК — <a href="https://nationalbank.kz/ru/news/svedeniya-po-strahovym-perestrahovochnym-organizaciyam" target="_blank" rel="noopener">Сведения по страховым (перестраховочным) организациям (по страхованию жизни)</a>: активы, резервы, капитал, прибыль, премии, выплаты (ежеквартально, нарастающим итогом).</li>
+      <li>НБРК — <a href="https://nationalbank.kz/ru/news/svedeniya-o-vypolnenii-strahovymi-perestrahovochnymi" target="_blank" rel="noopener">Сведения о выполнении пруденциальных нормативов</a>: Нмп, НДВА (ежемесячно).</li>
+      <li>Кредитные рейтинги — официальные сайты компаний.</li></ul>
+      <h2>Оговорки</h2><ul>
+      <li>Показатели регуляторные (НБРК) и не совпадают с МСФО.</li>
+      <li>АО «КСЖ «Коммеск-Өмір» с 01.04.2026 отчитывается как АО «КСЖ Centras Life».</li>
+      <li>У Nomad Life капитал снизился на 26,5 млрд ₸ при убытке 15,6 млрд: причины прочих изменений капитала в данных НБРК не раскрыты.</li>
+      <li>Данные встроены в портал (portal/data.js) и обновляются запуском scripts\\build-data.ps1 после правки CSV в папке data/.</li></ul>
+      <p class="muted">Сборка данных: ${esc(M.builtAt)}</p></div>`;
+  }
+};
+
+// ---------- таблица компаний: сортировка и фильтр ----------
+const COLS=[
+  ['name','Компания',c=>esc(c.name)],
+  ['assets1001','Активы',c=>f1(c.assets1001)],
+  ['capital1001','Капитал',c=>f1(c.capital1001)],
+  ['capitalDelta','Δ капитала',c=>`<span class="${cls(c.capitalDelta)}">${pct(c.capitalDelta)}</span>`],
+  ['premiums','Премии 9м',c=>f1(c.premiums)],
+  ['profit','Прибыль 9м',c=>`<span class="${cls(c.profit)}">${f1(c.profit)}</span>`],
+  ['roe','ROE',c=>f1(c.roe)+'%'],
+  ['nmpNow','Нмп 01.10',c=>`<span style="color:${nmpColor(c.nmpNow)};font-weight:600">${f2(c.nmpNow)}</span>`],
+  ['riskReported','Риск',c=>badge(c.riskReported)]
+];
+function loadState(){try{return Object.assign({q:'',rf:'',sk:'premiums',sd:-1},JSON.parse(localStorage.getItem('ksj-filters')||'{}'));}catch(e){return {q:'',rf:'',sk:'premiums',sd:-1};}}
+function saveState(s){try{localStorage.setItem('ksj-filters',JSON.stringify(s));}catch(e){}}
+function renderTable(){
+  const s=loadState(), t=document.getElementById('ct'); if(!t) return;
+  let rows=C.filter(c=>c.name.toLowerCase().includes(s.q.toLowerCase())&&(!s.rf||c.riskReported===s.rf));
+  rows.sort((a,b)=>{const x=a[s.sk],y=b[s.sk];return (typeof x==='string'?x.localeCompare(y,'ru'):x-y)*s.sd;});
+  t.innerHTML=`<tr>${COLS.map(([k,l])=>`<th class="sort" data-k="${k}">${l}${s.sk===k?(s.sd>0?' ▲':' ▼'):''}</th>`).join('')}</tr>`+
+    rows.map(c=>`<tr class="link" data-id="${c.id}">${COLS.map(col=>`<td>${col[2](c)}</td>`).join('')}</tr>`).join('')+
+    (rows.length?'':'<tr><td colspan="9" class="muted">Ничего не найдено</td></tr>');
+}
+
+// ---------- маршрутизация ----------
+const TABS=[['overview','Обзор рынка'],['companies','Компании'],['solvency','Платежеспособность'],['ratings','Рейтинги и риск'],['sources','Источники']];
+function route(){
+  const [v,arg]=(location.hash.slice(1)||'overview').split('/');
+  const view=views[v]?v:'overview';
+  document.getElementById('tabs').innerHTML=TABS.map(([k,l])=>`<button class="${k===view||(view==='company'&&k==='companies')?'active':''}" data-tab="${k}">${l}</button>`).join('');
+  document.getElementById('view').innerHTML=views[view](arg);
+  if(view==='companies') renderTable();
+  window.scrollTo(0,0);
+}
+document.addEventListener('click',e=>{
+  const tab=e.target.closest('[data-tab]'); if(tab){location.hash=tab.dataset.tab;return;}
+  const th=e.target.closest('th.sort'); if(th){const s=loadState();if(s.sk===th.dataset.k)s.sd*=-1;else{s.sk=th.dataset.k;s.sd=th.dataset.k==='name'?1:-1;}saveState(s);renderTable();return;}
+  const tr=e.target.closest('tr.link'); if(tr){location.hash='company/'+tr.dataset.id;}
+});
+document.addEventListener('input',e=>{
+  if(e.target.id==='q'||e.target.id==='rf'){const s=loadState();s[e.target.id]=e.target.value;saveState(s);renderTable();}
+});
+window.addEventListener('hashchange',route);
+route();
+})();
+</script>
+</body>
+</html>
